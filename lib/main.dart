@@ -29,7 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   BoardBackground _selectedBackground = BoardBackground.singleLine;
   final List<BoardItem> _boardItems = [];
   BoardItem? _selectedItem;
-  final List<BoardItem> _history = [];
+  final List<List<BoardItem>> _history = [];
   int _historyIndex = -1;
   bool _showLeftToolbar = true;
   bool _showRightToolbar = true;
@@ -359,8 +359,8 @@ class _HomeScreenState extends State<HomeScreen> {
           _endDrawing();
         }
       },
-      child: CustomPaint(
-        painter: DrawingPainter([_currentDrawing]),
+      child: Container(
+        color: Colors.transparent,
       ),
     );
   }
@@ -436,7 +436,22 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: Column(
           children: [
-            _buildBackgroundButton(),
+            PopupMenuButton<BoardBackground>(
+              icon: Icon(Icons.format_color_fill),
+              onSelected: (background) {
+                setState(() {
+                  _selectedBackground = background;
+                });
+              },
+              itemBuilder: (context) {
+                return BoardBackground.values.map((background) {
+                  return PopupMenuItem<BoardBackground>(
+                    value: background,
+                    child: Text(background.toString().split('.').last),
+                  );
+                }).toList();
+              },
+            ),
             _buildColorButton(Colors.black),
             _buildColorButton(Colors.red),
             _buildColorButton(Colors.blue),
@@ -449,25 +464,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildBackgroundButton() {
-    return PopupMenuButton<BoardBackground>(
-      icon: Icon(Icons.background),
-      onSelected: (background) {
-        setState(() {
-          _selectedBackground = background;
-        });
-      },
-      itemBuilder: (context) {
-        return BoardBackground.values.map((background) {
-          return PopupMenuItem<BoardBackground>(
-            value: background,
-            child: Text(background.toString().split('.').last),
-          );
-        }).toList();
-      },
     );
   }
 
@@ -558,6 +554,7 @@ enum Tool {
   emoji,
   shapes,
   select,
+  eraser,
   undo,
   redo,
   zoomIn,
