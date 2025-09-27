@@ -155,7 +155,6 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  // ignore: library_private_types_in_public_api
   _HomeScreenState createState() => _HomeScreenState();
 }
 
@@ -170,6 +169,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Drawing> _drawings = [];
   Drawing? _currentDrawing;
   BoardItem? _tempShape;
+  Offset? _dragStart; // To track the start of a shape or move drag
 
   // Object manipulation
   BoardItem? _selectedItem;
@@ -190,9 +190,20 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<Map<String, dynamic>> _history = [];
   int _historyIndex = -1;
 
+  // Infinite canvas properties
+  static const double _infiniteCanvasSize = 1000000.0; // Very large canvas
+  late Offset _canvasCenter;
+
+  // Gesture handling state
+  bool _isInteracting = false;
+
   @override
   void initState() {
     super.initState();
+    _canvasCenter = const Offset(
+      _infiniteCanvasSize / 2,
+      _infiniteCanvasSize / 2,
+    );
     _saveStateToHistory();
     _transformationController.addListener(() {
       if (mounted) {
@@ -201,6 +212,21 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     });
+
+    // Initialize the transformation to center the view
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _centerView();
+    });
+  }
+
+  void _centerView() {
+    final screenSize = MediaQuery.of(context).size;
+    final matrix = Matrix4.identity()
+      ..translate(
+        screenSize.width / 2 - _canvasCenter.dx,
+        screenSize.height / 2 - _canvasCenter.dy,
+      );
+    _transformationController.value = matrix;
   }
 
   @override
@@ -292,10 +318,20 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // --- GESTURE & INTERACTION HANDLING ---
-  void _onInteractionStart(ScaleStartDetails details) {
-    final position = _transformationController.toScene(details.localFocalPoint);
-    _isResizing = _selectedItem != null && _isOverResizeHandle(position);
 
+  void _onPointerDown(PointerDownEvent event) {
+    // A tap might be a double-tap, so we wait briefly
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (!_isInteracting && _editingItemId != null) {
+        _stopEditing();
+      }
+    });
+
+    _isInteracting = true;
+    final position = _transformationController.toScene(event.localPosition);
+    _dragStart = position;
+
+    _isResizing = _selectedItem != null && _isOverResizeHandle(position);
     if (_isResizing) return;
 
     switch (_selectedTool) {
@@ -334,10 +370,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _onInteractionUpdate(ScaleUpdateDetails details) {
-    final position = _transformationController.toScene(details.localFocalPoint);
+  void _onPointerMove(PointerMoveEvent event) {
+    final position = _transformationController.toScene(event.localPosition);
 
-    if (_isResizing) {
+    if (_isResizing && _selectedItem != null) {
       setState(() {
         final newWidth = position.dx - _selectedItem!.position.dx;
         final newHeight = position.dy - _selectedItem!.position.dy;
@@ -358,29 +394,27 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
       case Tool.select:
         if (_selectedItem != null && _editingItemId == null) {
-          setState(
-            () => _selectedItem!.position +=
-                details.focalPointDelta /
-                _transformationController.value.getMaxScaleOnAxis(),
-          );
+          setState(() => _selectedItem!.position += event.delta / _currentZoom);
         }
         break;
       case Tool.rectangle:
       case Tool.ellipse:
-        setState(() {
-          final startPos = _tempShape!.position;
-          _tempShape!.size = Size(
-            position.dx - startPos.dx,
-            position.dy - startPos.dy,
-          );
-        });
+        if (_tempShape != null && _dragStart != null) {
+          setState(() {
+            final rect = Rect.fromPoints(_dragStart!, position);
+            _tempShape!.position = rect.topLeft;
+            _tempShape!.size = rect.size;
+          });
+        }
         break;
       case Tool.text:
         break;
     }
   }
 
-  void _onInteractionEnd(ScaleEndDetails details) {
+  void _onPointerUp(PointerUpEvent event) {
+    _isInteracting = false;
+    _dragStart = null;
     if (_isResizing) {
       _isResizing = false;
       _saveStateToHistory();
@@ -388,32 +422,25 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (_currentDrawing != null) {
-      setState(() {
+      if (_currentDrawing!.points.length > 1) {
         _drawings.add(_currentDrawing!);
-        _currentDrawing = null;
-      });
+      }
+      setState(() => _currentDrawing = null);
       _saveStateToHistory();
     } else if (_tempShape != null) {
-      // Normalize shape size and position
-      final Rect rect = Rect.fromPoints(
-        _tempShape!.position,
-        _tempShape!.position + _tempShape!.size.bottomRight(Offset.zero),
-      );
-      _tempShape!.position = rect.topLeft;
-      _tempShape!.size = rect.size;
-
       if (_tempShape!.size.width > 5 && _tempShape!.size.height > 5) {
         final newShape = _tempShape!.copy();
-        setState(() => _items.add(newShape));
+        _items.add(newShape);
         _saveStateToHistory();
       }
       setState(() => _tempShape = null);
-    } else if (_selectedTool == Tool.eraser) {
+    } else if (_selectedTool == Tool.eraser || _selectedTool == Tool.select) {
       _saveStateToHistory();
     }
   }
 
-  void _onDoubleTap() {
+  void _onDoubleTap(TapDownDetails details) {
+    _selectItemAt(_transformationController.toScene(details.localPosition));
     if (_selectedItem != null && _selectedItem is TextItem) {
       _startEditing(_selectedItem as TextItem);
     }
@@ -423,18 +450,21 @@ class _HomeScreenState extends State<HomeScreen> {
   void _selectItemAt(Offset position) {
     _stopEditing();
     setState(() {
-      _selectedItem = null;
+      BoardItem? newSelectedItem;
+      // Iterate in reverse to select the top-most item
       for (final item in _items.reversed) {
-        if (Rect.fromLTWH(
+        final itemRect = Rect.fromLTWH(
           item.position.dx,
           item.position.dy,
           item.size.width,
           item.size.height,
-        ).contains(position)) {
-          _selectedItem = item;
+        );
+        if (itemRect.contains(position)) {
+          newSelectedItem = item;
           break;
         }
       }
+      _selectedItem = newSelectedItem;
     });
   }
 
@@ -443,8 +473,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final handlePos =
         _selectedItem!.position +
         Offset(_selectedItem!.size.width, _selectedItem!.size.height);
-    return (position - handlePos).distance <
-        20 / _transformationController.value.getMaxScaleOnAxis();
+    return (position - handlePos).distance < 20 / _currentZoom;
   }
 
   void _startEditing(TextItem item) {
@@ -502,11 +531,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _setZoom(double newZoom) {
-    final clampedZoom = newZoom.clamp(0.2, 4.0);
+    final clampedZoom = newZoom.clamp(0.1, 10.0); // Extended zoom range
     final center = MediaQuery.of(context).size.center(Offset.zero);
     final sceneCenter = _transformationController.toScene(center);
 
-    // FIX: Rewrote Matrix4 calculation to avoid deprecated methods flagged by the analyzer.
     final scaleFactor = clampedZoom / _currentZoom;
     final translation = Matrix4.translationValues(
       sceneCenter.dx,
@@ -521,9 +549,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     final matrix = translation * scale * antiTranslation;
-
     _transformationController.value = _transformationController.value
         .multiplied(matrix);
+  }
+
+  void _resetView() {
+    _centerView();
+    _setZoom(1.0);
   }
 
   // --- UI WIDGET BUILDERS ---
@@ -532,41 +564,47 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          InteractiveViewer(
-            transformationController: _transformationController,
-            minScale: 0.2,
-            maxScale: 4.0,
-            boundaryMargin: const EdgeInsets.all(double.infinity),
+          // Infinite canvas with InteractiveViewer
+          Listener(
+            onPointerDown: _onPointerDown,
+            onPointerMove: _onPointerMove,
+            onPointerUp: _onPointerUp,
             child: GestureDetector(
-              onScaleStart: _onInteractionStart,
-              onScaleUpdate: _onInteractionUpdate,
-              onScaleEnd: _onInteractionEnd,
-              onDoubleTap: _onDoubleTap,
-              onTap: _stopEditing,
-              child: Container(
-                width: 5000,
-                height: 5000,
-                color: _backgroundColor,
-                child: CustomPaint(
-                  painter: BackgroundPainter(
-                    background: _selectedBackground,
-                    zoom: _transformationController.value.getMaxScaleOnAxis(),
-                  ),
-                  foregroundPainter: DrawingPainter(
-                    drawings: _drawings,
-                    currentDrawing: _currentDrawing,
-                  ),
-                  child: Stack(
-                    children: [
-                      ..._items.map(_buildBoardItem),
-                      if (_tempShape != null) _buildBoardItem(_tempShape!),
-                      if (_editingItemId != null) _buildTextEditor(),
-                    ],
+              onDoubleTapDown: _onDoubleTap,
+              child: InteractiveViewer(
+                transformationController: _transformationController,
+                minScale: 0.1, // Allow more zoom out
+                maxScale: 10.0, // Allow more zoom in
+                boundaryMargin: EdgeInsets.zero, // Remove boundaries
+                constrained: false, // Allow unconstrained scrolling
+                panEnabled: true, // Always allow panning
+                scaleEnabled: true, // Always allow zooming
+                child: Container(
+                  width: _infiniteCanvasSize,
+                  height: _infiniteCanvasSize,
+                  color: _backgroundColor,
+                  child: CustomPaint(
+                    painter: BackgroundPainter(
+                      background: _selectedBackground,
+                      zoom: _transformationController.value.getMaxScaleOnAxis(),
+                    ),
+                    foregroundPainter: DrawingPainter(
+                      drawings: _drawings,
+                      currentDrawing: _currentDrawing,
+                    ),
+                    child: Stack(
+                      children: [
+                        ..._items.map(_buildBoardItem),
+                        if (_tempShape != null) _buildBoardItem(_tempShape!),
+                        if (_editingItemId != null) _buildTextEditor(),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
           ),
+          // UI Overlays
           if (_selectedItem != null && _editingItemId == null)
             _buildSelectionHandles(),
           _buildLeftToolbar(),
@@ -581,7 +619,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildBoardItem(BoardItem item) {
     Widget content;
-    // FIX: Added curly braces to if statements
     if (item is TextItem) {
       content = Opacity(
         opacity: _editingItemId == item.id ? 0.0 : 1.0,
@@ -701,6 +738,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 'Clear Board',
                 _clearBoard,
               ),
+              _buildIconButton(
+                Icons.center_focus_strong,
+                'Reset View',
+                _resetView,
+              ),
             ],
           ),
         ),
@@ -771,81 +813,84 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
-        child: Row(
-          children: [
-            _buildIconButton(
-              Icons.delete_outline,
-              "Delete",
-              _deleteSelectedItem,
-            ),
-            _buildIconButton(Icons.copy, "Duplicate", _duplicateSelectedItem),
-            _buildIconButton(
-              Icons.flip_to_front_outlined,
-              "Bring to Front",
-              _bringToFront,
-            ),
-            _buildIconButton(
-              Icons.flip_to_back_outlined,
-              "Send to Back",
-              _sendToBack,
-            ),
-            if (isTextItem) ...[
-              _buildDivider(),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
               _buildIconButton(
-                Icons.format_bold,
-                "Bold",
-                () => _updateSelectedItem((item) {
-                  if (item is TextItem) {
-                    item.fontWeight = item.fontWeight == FontWeight.bold
-                        ? FontWeight.normal
-                        : FontWeight.bold;
-                  }
-                }),
+                Icons.delete_outline,
+                "Delete",
+                _deleteSelectedItem,
+              ),
+              _buildIconButton(Icons.copy, "Duplicate", _duplicateSelectedItem),
+              _buildIconButton(
+                Icons.flip_to_front_outlined,
+                "Bring to Front",
+                _bringToFront,
               ),
               _buildIconButton(
-                Icons.format_italic,
-                "Italic",
-                () => _updateSelectedItem((item) {
-                  if (item is TextItem) {
-                    item.fontStyle = item.fontStyle == FontStyle.italic
-                        ? FontStyle.normal
-                        : FontStyle.italic;
-                  }
-                }),
+                Icons.flip_to_back_outlined,
+                "Send to Back",
+                _sendToBack,
               ),
-              _buildIconButton(
-                Icons.format_underline,
-                "Underline",
-                () => _updateSelectedItem((item) {
-                  if (item is TextItem) {
-                    item.decoration =
-                        item.decoration == TextDecoration.underline
-                        ? TextDecoration.none
-                        : TextDecoration.underline;
-                  }
-                }),
-              ),
-              _buildDivider(),
-              _buildIconButton(
-                Icons.text_increase,
-                "Increase Size",
-                () => _updateSelectedItem((item) {
-                  if (item is TextItem) {
-                    item.fontSize += 2;
-                  }
-                }),
-              ),
-              _buildIconButton(
-                Icons.text_decrease,
-                "Decrease Size",
-                () => _updateSelectedItem((item) {
-                  if (item is TextItem) {
-                    item.fontSize = item.fontSize > 4 ? item.fontSize - 2 : 4;
-                  }
-                }),
-              ),
+              if (isTextItem) ...[
+                _buildDivider(),
+                _buildIconButton(
+                  Icons.format_bold,
+                  "Bold",
+                  () => _updateSelectedItem((item) {
+                    if (item is TextItem) {
+                      item.fontWeight = item.fontWeight == FontWeight.bold
+                          ? FontWeight.normal
+                          : FontWeight.bold;
+                    }
+                  }),
+                ),
+                _buildIconButton(
+                  Icons.format_italic,
+                  "Italic",
+                  () => _updateSelectedItem((item) {
+                    if (item is TextItem) {
+                      item.fontStyle = item.fontStyle == FontStyle.italic
+                          ? FontStyle.normal
+                          : FontStyle.italic;
+                    }
+                  }),
+                ),
+                _buildIconButton(
+                  Icons.format_underline,
+                  "Underline",
+                  () => _updateSelectedItem((item) {
+                    if (item is TextItem) {
+                      item.decoration =
+                          item.decoration == TextDecoration.underline
+                          ? TextDecoration.none
+                          : TextDecoration.underline;
+                    }
+                  }),
+                ),
+                _buildDivider(),
+                _buildIconButton(
+                  Icons.text_increase,
+                  "Increase Size",
+                  () => _updateSelectedItem((item) {
+                    if (item is TextItem) {
+                      item.fontSize += 2;
+                    }
+                  }),
+                ),
+                _buildIconButton(
+                  Icons.text_decrease,
+                  "Decrease Size",
+                  () => _updateSelectedItem((item) {
+                    if (item is TextItem) {
+                      item.fontSize = item.fontSize > 4 ? item.fontSize - 2 : 4;
+                    }
+                  }),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -878,9 +923,9 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(
               width: 150,
               child: Slider(
-                value: _currentZoom,
-                min: 0.2,
-                max: 4.0,
+                value: _currentZoom.clamp(0.1, 10.0),
+                min: 0.1,
+                max: 10.0,
                 onChanged: _setZoom,
               ),
             ),
@@ -1209,7 +1254,9 @@ class BackgroundPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = Colors.grey.withAlpha(128)
-      ..strokeWidth = 1.0;
+      ..strokeWidth = 1.0 / zoom; // Adjust line thickness based on zoom
+
+    // Dynamic spacing based on zoom level
     double getSpacing(double base) => base * (1 + (1 / zoom) * 0.5);
 
     switch (background) {
