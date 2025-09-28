@@ -196,6 +196,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Gesture handling state
   bool _isInteracting = false;
+  int _activePointers = 0;
+  bool _isToolbarOnLeft = true; // ADDED: To track toolbar position
 
   @override
   void initState() {
@@ -319,8 +321,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // --- GESTURE & INTERACTION HANDLING ---
 
+  void _onPointerCancel(PointerCancelEvent event) {
+    setState(() {
+      _activePointers--;
+    });
+  }
+
   void _onPointerDown(PointerDownEvent event) {
-    // A tap might be a double-tap, so we wait briefly
+    setState(() {
+      _activePointers++;
+    });
+
     Future.delayed(const Duration(milliseconds: 200), () {
       if (!_isInteracting && _editingItemId != null) {
         _stopEditing();
@@ -413,6 +424,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onPointerUp(PointerUpEvent event) {
+    setState(() {
+      _activePointers--;
+    });
+
     _isInteracting = false;
     _dragStart = null;
     if (_isResizing) {
@@ -561,6 +576,9 @@ class _HomeScreenState extends State<HomeScreen> {
   // --- UI WIDGET BUILDERS ---
   @override
   Widget build(BuildContext context) {
+    final bool isPanEnabled =
+        _selectedTool == Tool.select || _activePointers > 1;
+
     return Scaffold(
       body: Stack(
         children: [
@@ -569,16 +587,17 @@ class _HomeScreenState extends State<HomeScreen> {
             onPointerDown: _onPointerDown,
             onPointerMove: _onPointerMove,
             onPointerUp: _onPointerUp,
+            onPointerCancel: _onPointerCancel,
             child: GestureDetector(
               onDoubleTapDown: _onDoubleTap,
               child: InteractiveViewer(
                 transformationController: _transformationController,
-                minScale: 0.1, // Allow more zoom out
-                maxScale: 10.0, // Allow more zoom in
-                boundaryMargin: EdgeInsets.zero, // Remove boundaries
-                constrained: false, // Allow unconstrained scrolling
-                panEnabled: true, // Always allow panning
-                scaleEnabled: true, // Always allow zooming
+                minScale: 0.1,
+                maxScale: 10.0,
+                boundaryMargin: EdgeInsets.zero,
+                constrained: false,
+                panEnabled: isPanEnabled,
+                scaleEnabled: true,
                 child: Container(
                   width: _infiniteCanvasSize,
                   height: _infiniteCanvasSize,
@@ -607,7 +626,8 @@ class _HomeScreenState extends State<HomeScreen> {
           // UI Overlays
           if (_selectedItem != null && _editingItemId == null)
             _buildSelectionHandles(),
-          _buildLeftToolbar(),
+          _buildMainToolbar(), // MODIFIED: Renamed from _buildLeftToolbar
+          _buildShiftToolbarButton(), // ADDED: New button to move toolbar
           if (_isPropertiesBarVisible()) _buildRightPropertiesBar(),
           if (_selectedItem != null && _editingItemId == null)
             _buildSelectionContextMenu(),
@@ -685,14 +705,16 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildLeftToolbar() {
+  // MODIFIED: This is the new vertical, shiftable toolbar
+  Widget _buildMainToolbar() {
     return Positioned(
       top: 20,
-      left: 20,
+      left: _isToolbarOnLeft ? 20 : null,
+      right: _isToolbarOnLeft ? null : 20,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width - 40,
+          maxHeight: MediaQuery.of(context).size.height - 40,
         ),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -706,10 +728,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
+          scrollDirection: Axis.vertical,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _buildToolButton(Tool.select, Icons.mouse_outlined, 'Select'),
+              _buildToolButton(Tool.select, Icons.open_with, 'Select'),
               _buildToolButton(Tool.pen, Icons.edit_outlined, 'Pen'),
               _buildToolButton(Tool.text, Icons.text_fields_outlined, 'Text'),
               _buildToolButton(
@@ -728,10 +751,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 'Add Emoji/Symbol',
                 _showObjectLibrary,
               ),
-              _buildDivider(),
+              _buildDivider(isVertical: true),
               _buildIconButton(Icons.undo, 'Undo', _undo),
               _buildIconButton(Icons.redo, 'Redo', _redo),
-              _buildDivider(),
+              _buildDivider(isVertical: true),
               _buildBackgroundMenu(),
               _buildIconButton(
                 Icons.delete_forever_outlined,
@@ -750,6 +773,27 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // NEW: This button shifts the main toolbar from left to right
+  Widget _buildShiftToolbarButton() {
+    return Positioned(
+      top: MediaQuery.of(context).size.height / 2 - 24,
+      left: _isToolbarOnLeft ? null : 10.0,
+      right: _isToolbarOnLeft ? 10.0 : null,
+      child: FloatingActionButton.small(
+        tooltip: 'Switch Toolbar Side',
+        elevation: 4.0,
+        onPressed: () {
+          setState(() {
+            _isToolbarOnLeft = !_isToolbarOnLeft;
+          });
+        },
+        child: Icon(
+          _isToolbarOnLeft ? Icons.arrow_forward_ios : Icons.arrow_back_ios,
+        ),
+      ),
+    );
+  }
+
   bool _isPropertiesBarVisible() => [
     Tool.pen,
     Tool.eraser,
@@ -761,7 +805,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildRightPropertiesBar() {
     return Positioned(
       top: 20,
-      right: 20,
+      // MODIFIED: Shift this bar to avoid overlapping with the main toolbar
+      right: _isToolbarOnLeft ? 20 : 80,
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
@@ -989,11 +1034,14 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildDivider() => Container(
-    width: 1,
-    height: 24,
+  // MODIFIED: Divider can now be horizontal for the vertical toolbar
+  Widget _buildDivider({bool isVertical = false}) => Container(
+    width: isVertical ? 32 : 1,
+    height: isVertical ? 1 : 24,
     color: Colors.grey[300],
-    margin: const EdgeInsets.symmetric(horizontal: 8),
+    margin: isVertical
+        ? const EdgeInsets.symmetric(vertical: 8)
+        : const EdgeInsets.symmetric(horizontal: 8),
   );
 
   Widget _buildBackgroundMenu() {
