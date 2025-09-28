@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
@@ -110,6 +111,7 @@ class TextItem extends BoardItem {
 class ShapeItem extends BoardItem {
   final ShapeType shapeType;
   final Color color;
+  final double strokeWidth;
 
   ShapeItem({
     required super.id,
@@ -117,6 +119,7 @@ class ShapeItem extends BoardItem {
     required super.size,
     required this.shapeType,
     this.color = Colors.blue,
+    this.strokeWidth = 3.0,
   });
 
   @override
@@ -127,6 +130,7 @@ class ShapeItem extends BoardItem {
       size: size,
       shapeType: shapeType,
       color: color,
+      strokeWidth: strokeWidth,
     );
   }
 }
@@ -142,8 +146,9 @@ class Drawing {
     this.strokeWidth = 3.0,
   });
 
-  Drawing copy() => Drawing(
-    points: List<Offset>.from(points),
+  // MODIFIED: Allows copying with a new set of points for splitting the drawing
+  Drawing copy({List<Offset>? points}) => Drawing(
+    points: points ?? List<Offset>.from(this.points),
     color: color,
     strokeWidth: strokeWidth,
   );
@@ -197,7 +202,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Gesture handling state
   bool _isInteracting = false;
   int _activePointers = 0;
-  bool _isToolbarOnLeft = true; // ADDED: To track toolbar position
+  bool _isToolbarOnLeft = true;
 
   @override
   void initState() {
@@ -372,6 +377,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ? ShapeType.rectangle
                 : ShapeType.ellipse,
             color: _drawingColor,
+            strokeWidth: _penSize,
           ),
         );
         break;
@@ -537,12 +543,143 @@ class _HomeScreenState extends State<HomeScreen> {
     _items.insert(0, item);
   });
 
+  // --- ERASER LOGIC ---
+
+  // MODIFIED: Complete overhaul of the eraser logic for partial erasing.
   void _eraseAtPoint(Offset position) {
-    setState(
-      () => _drawings.removeWhere(
-        (d) => d.points.any((p) => (p - position).distance < _eraserSize),
-      ),
+    final eraserRadius = _eraserSize / 2.0;
+
+    setState(() {
+      // Step 1: Convert any touched shapes into drawings.
+      final shapesToConvert = <ShapeItem>[];
+      for (final item in _items) {
+        if (item is ShapeItem) {
+          if (_isEraserHittingShape(position, eraserRadius, item)) {
+            shapesToConvert.add(item);
+          }
+        }
+      }
+
+      for (final shape in shapesToConvert) {
+        _items.remove(shape);
+        _drawings.add(_convertShapeToDrawing(shape));
+      }
+
+      // Step 2: Partially erase all drawings (including newly converted ones).
+      final updatedDrawings = <Drawing>[];
+      for (final drawing in _drawings) {
+        var currentSegment = <Offset>[];
+        for (final point in drawing.points) {
+          if ((point - position).distance < eraserRadius) {
+            // Point is inside the eraser, so we end the current segment.
+            if (currentSegment.length > 1) {
+              updatedDrawings.add(drawing.copy(points: currentSegment));
+            }
+            currentSegment = <Offset>[]; // Start a new segment.
+          } else {
+            // Point is outside the eraser, add it to the segment.
+            currentSegment.add(point);
+          }
+        }
+        // Add the last remaining segment if it's a valid line.
+        if (currentSegment.length > 1) {
+          updatedDrawings.add(drawing.copy(points: currentSegment));
+        }
+      }
+      _drawings = updatedDrawings;
+    });
+  }
+
+  // NEW: Helper to detect if the eraser is touching the border of a shape.
+  bool _isEraserHittingShape(
+    Offset erasePosition,
+    double eraserRadius,
+    ShapeItem shape,
+  ) {
+    final points = _generatePointsForShape(
+      shape,
+      density: 0.5,
+    ); // Use medium density for hit detection
+    final hitThreshold = eraserRadius + (shape.strokeWidth / 2);
+
+    for (final point in points) {
+      if ((point - erasePosition).distance < hitThreshold) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // NEW: Helper to convert a ShapeItem into a Drawing object.
+  Drawing _convertShapeToDrawing(ShapeItem shape) {
+    final points = _generatePointsForShape(
+      shape,
+      density: 1.0,
+    ); // Use high density for a smooth conversion
+    return Drawing(
+      points: points,
+      color: shape.color,
+      strokeWidth: shape.strokeWidth,
     );
+  }
+
+  // NEW: Helper to generate a list of points outlining a shape.
+  List<Offset> _generatePointsForShape(
+    ShapeItem shape, {
+    double density = 1.0,
+  }) {
+    final points = <Offset>[];
+    // A smaller step means more points (higher density)
+    const double baseStep = 3.0;
+    final step = baseStep / density;
+
+    if (shape.shapeType == ShapeType.rectangle) {
+      final rect = Rect.fromLTWH(
+        shape.position.dx,
+        shape.position.dy,
+        shape.size.width,
+        shape.size.height,
+      );
+      // Top edge
+      for (double x = rect.left; x <= rect.right; x += step) {
+        points.add(Offset(x, rect.top));
+      }
+      // Right edge
+      for (double y = rect.top; y <= rect.bottom; y += step) {
+        points.add(Offset(rect.right, y));
+      }
+      // Bottom edge
+      for (double x = rect.right; x >= rect.left; x -= step) {
+        points.add(Offset(x, rect.bottom));
+      }
+      // Left edge
+      for (double y = rect.bottom; y >= rect.top; y -= step) {
+        points.add(Offset(rect.left, y));
+      }
+    } else if (shape.shapeType == ShapeType.ellipse) {
+      final rect = Rect.fromLTWH(
+        shape.position.dx,
+        shape.position.dy,
+        shape.size.width,
+        shape.size.height,
+      );
+      final radiusX = rect.width / 2;
+      final radiusY = rect.height / 2;
+      final center = rect.center;
+
+      // Estimate circumference to determine the number of points for consistent density
+      final circumference =
+          2 * pi * sqrt((pow(radiusX, 2) + pow(radiusY, 2)) / 2);
+      final numSteps = (circumference / step).ceil();
+
+      for (int i = 0; i <= numSteps; i++) {
+        final angle = (i / numSteps) * 2 * pi;
+        final x = center.dx + radiusX * cos(angle);
+        final y = center.dy + radiusY * sin(angle);
+        points.add(Offset(x, y));
+      }
+    }
+    return points;
   }
 
   void _setZoom(double newZoom) {
@@ -626,8 +763,8 @@ class _HomeScreenState extends State<HomeScreen> {
           // UI Overlays
           if (_selectedItem != null && _editingItemId == null)
             _buildSelectionHandles(),
-          _buildMainToolbar(), // MODIFIED: Renamed from _buildLeftToolbar
-          _buildShiftToolbarButton(), // ADDED: New button to move toolbar
+          _buildMainToolbar(),
+          _buildShiftToolbarButton(),
           if (_isPropertiesBarVisible()) _buildRightPropertiesBar(),
           if (_selectedItem != null && _editingItemId == null)
             _buildSelectionContextMenu(),
@@ -705,7 +842,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // MODIFIED: This is the new vertical, shiftable toolbar
   Widget _buildMainToolbar() {
     return Positioned(
       top: 20,
@@ -773,7 +909,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // NEW: This button shifts the main toolbar from left to right
   Widget _buildShiftToolbarButton() {
     return Positioned(
       top: MediaQuery.of(context).size.height / 2 - 24,
@@ -805,7 +940,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildRightPropertiesBar() {
     return Positioned(
       top: 20,
-      // MODIFIED: Shift this bar to avoid overlapping with the main toolbar
       right: _isToolbarOnLeft ? 20 : 80,
       child: Container(
         padding: const EdgeInsets.all(8),
@@ -1034,7 +1168,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // MODIFIED: Divider can now be horizontal for the vertical toolbar
   Widget _buildDivider({bool isVertical = false}) => Container(
     width: isVertical ? 32 : 1,
     height: isVertical ? 1 : 24,
@@ -1279,8 +1412,16 @@ class ShapePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = item.color
-      ..style = PaintingStyle.fill;
-    final rect = Rect.fromLTWH(0, 0, item.size.width, item.size.height);
+      ..strokeWidth = item.strokeWidth
+      ..style = PaintingStyle.stroke;
+
+    final rect = Rect.fromLTWH(
+      item.strokeWidth / 2,
+      item.strokeWidth / 2,
+      item.size.width - item.strokeWidth,
+      item.size.height - item.strokeWidth,
+    );
+
     if (item.shapeType == ShapeType.rectangle) {
       canvas.drawRect(rect, paint);
     } else {
