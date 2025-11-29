@@ -1,11 +1,13 @@
 import 'dart:math';
 import 'dart:ui' as ui;
+// Required for Uint8List
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart'; // Import File Picker
 
 void main() {
   if (kIsWeb) {
@@ -157,6 +159,51 @@ class ShapeItem extends BoardItem {
   }
 }
 
+class ImageItem extends BoardItem {
+  final Uint8List imageData;
+
+  ImageItem({
+    required super.id,
+    required super.position,
+    required super.size,
+    required this.imageData,
+    super.angle,
+  });
+
+  @override
+  BoardItem copy() => ImageItem(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        position: position,
+        size: size,
+        imageData: imageData,
+        angle: angle,
+      );
+}
+
+class Model3DItem extends BoardItem {
+  final String modelName;
+  final Uint8List? modelData;
+
+  Model3DItem({
+    required super.id,
+    required super.position,
+    required super.size,
+    required this.modelName,
+    this.modelData,
+    super.angle,
+  });
+
+  @override
+  BoardItem copy() => Model3DItem(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        position: position,
+        size: size,
+        modelName: modelName,
+        modelData: modelData,
+        angle: angle,
+      );
+}
+
 class Drawing {
   final List<Offset> points;
   final Color color;
@@ -173,6 +220,175 @@ class Drawing {
     color: color,
     strokeWidth: strokeWidth,
   );
+}
+
+// Updated Keyboard Layouts to support many languages
+class KeyboardLayout {
+  static const Map<String, List<String>> layouts = {
+    'English': [
+      'QWERTYUIOP',
+      'ASDFGHJKL',
+      'ZXCVBNM'
+    ],
+    'Spanish': [
+      'QWERTYUIOP',
+      'ASDFGHJKLÑ',
+      'ZXCVBNM'
+    ],
+    'French': [
+      'AZERTYUIOP',
+      'QSDFGHJKLM',
+      'WXCVBN'
+    ],
+    'German': [
+      'QWERTZUIOPÜ',
+      'ASDFGHJKLÖÄ',
+      'YXCVBNM'
+    ],
+    'Portuguese': [
+      'QWERTYUIOP',
+      'ASDFGHJKLÇ',
+      'ZXCVBNM'
+    ],
+    'Russian': [
+      'ЙЦУКЕНГШЩЗХЪ',
+      'ФЫВАПРОЛДЖЭ',
+      'ЯЧСМИТЬБЮ'
+    ],
+    'Turkish': [
+      'ERTYUIOPĞÜ',
+      'ASDFGHJKLŞİ',
+      'ZYCVBNMÖÇ'
+    ],
+    'Symbols': [
+      '1234567890',
+      "-/:;()&@",
+      '.,?!'
+    ],
+  };
+}
+
+// --- VIRTUAL KEYBOARD WIDGET ---
+
+class VirtualKeyboard extends StatefulWidget {
+  final TextEditingController controller;
+  final VoidCallback onClose;
+
+  const VirtualKeyboard({
+    super.key, 
+    required this.controller, 
+    required this.onClose
+  });
+
+  @override
+  _VirtualKeyboardState createState() => _VirtualKeyboardState();
+}
+
+class _VirtualKeyboardState extends State<VirtualKeyboard> {
+  String _currentLanguage = 'English';
+  List<String> _currentKeys = KeyboardLayout.layouts['English']!;
+  bool _isShift = false;
+
+  void _onKeyTap(String key) {
+    final text = widget.controller.text;
+    final selection = widget.controller.selection;
+    final int start = selection.baseOffset < 0 ? text.length : selection.baseOffset;
+    
+    final newText = text.replaceRange(start, start, _isShift ? key : key.toLowerCase());
+    widget.controller.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: start + 1),
+    );
+  }
+
+  void _onBackspace() {
+    final text = widget.controller.text;
+    final selection = widget.controller.selection;
+    final int start = selection.baseOffset < 0 ? text.length : selection.baseOffset;
+    if (start > 0) {
+      final newText = text.replaceRange(start - 1, start, '');
+      widget.controller.value = TextEditingValue(
+        text: newText,
+        selection: TextSelection.collapsed(offset: start - 1),
+      );
+    }
+  }
+
+  void _changeLanguage(String? newValue) {
+    if (newValue != null) {
+      setState(() {
+        _currentLanguage = newValue;
+        _currentKeys = KeyboardLayout.layouts[newValue]!;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.grey[200],
+      padding: const EdgeInsets.all(8.0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              DropdownButton<String>(
+                value: _currentLanguage,
+                items: KeyboardLayout.layouts.keys.map((String value) {
+                  return DropdownMenuItem<String>(
+                    value: value,
+                    child: Text(value),
+                  );
+                }).toList(),
+                onChanged: _changeLanguage,
+              ),
+              const Spacer(),
+              IconButton(icon: const Icon(Icons.close), onPressed: widget.onClose),
+            ],
+          ),
+          ..._currentKeys.map((row) => Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: row.split('').map((char) {
+              return Padding(
+                padding: const EdgeInsets.all(2.0),
+                child: ElevatedButton(
+                  onPressed: () => _onKeyTap(char),
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(36, 40),
+                    padding: EdgeInsets.zero,
+                  ),
+                  child: Text(
+                    _isShift ? char : char.toLowerCase(), 
+                    style: const TextStyle(fontSize: 18)
+                  ),
+                ),
+              );
+            }).toList(),
+          )),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+               IconButton(
+                 icon: Icon(Icons.arrow_upward, color: _isShift ? Colors.blue : Colors.black),
+                 onPressed: () => setState(() => _isShift = !_isShift),
+               ),
+               Expanded(
+                 child: Padding(
+                   padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                   child: ElevatedButton(
+                     onPressed: () => _onKeyTap(' '), 
+                     child: const Text('Space')
+                   ),
+                 )
+               ),
+               IconButton(icon: const Icon(Icons.backspace), onPressed: _onBackspace),
+            ],
+          )
+        ],
+      ),
+    );
+  }
 }
 
 // --- MAIN SCREEN WIDGET ---
@@ -198,7 +414,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Offset? _dragStart;
 
   // Object manipulation
-  BoardItem? _selectedItem;
+  final Set<BoardItem> _selectedItems = {}; 
   String? _editingItemId;
   final TransformationController _transformationController =
       TransformationController();
@@ -209,6 +425,10 @@ class _HomeScreenState extends State<HomeScreen> {
   double _rotationStartAngle = 0.0;
   double _dragStartAngle = 0.0;
   Offset _lastPanOffset = Offset.zero;
+
+  // Feature Flags
+  bool _isMultiSelectMode = false;
+  bool _showVirtualKeyboard = false;
 
   // Tool properties
   Color _drawingColor = Colors.black;
@@ -291,7 +511,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final state = _history[_historyIndex];
         _items = List<BoardItem>.from(state['items']);
         _drawings = List<Drawing>.from(state['drawings']);
-        _selectedItem = null;
+        _selectedItems.clear();
         _editingItemId = null;
       });
     }
@@ -302,7 +522,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _items.clear();
       _drawings.clear();
-      _selectedItem = null;
+      _selectedItems.clear();
       _editingItemId = null;
     });
     _saveStateToHistory();
@@ -319,7 +539,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     setState(() {
       _items.add(newItem);
-      _selectedItem = newItem;
+      _selectedItems.clear();
+      _selectedItems.add(newItem);
     });
     _startEditing(newItem);
     _saveStateToHistory();
@@ -373,20 +594,15 @@ class _HomeScreenState extends State<HomeScreen> {
     _dragStart = position;
     _lastPanOffset = position;
 
-    // Check Handles (Rotate/Resize) first
-    if (_selectedTool == Tool.select && _selectedItem != null) {
-      final handles = _getHandlePositions(_selectedItem!);
-      // Increased hit test area for handles (40 instead of 20)
+    if (_selectedTool == Tool.select && _selectedItems.length == 1) {
+      final singleItem = _selectedItems.first;
+      final handles = _getHandlePositions(singleItem);
+      
       if ((position - handles['rotate']!).distance < 40 / _currentZoom) {
         setState(() {
           _isRotating = true;
-          final center =
-              _selectedItem!.position +
-              Offset(
-                _selectedItem!.size.width / 2,
-                _selectedItem!.size.height / 2,
-              );
-          _rotationStartAngle = _selectedItem!.angle;
+          final center = singleItem.position + Offset(singleItem.size.width / 2, singleItem.size.height / 2);
+          _rotationStartAngle = singleItem.angle;
           _dragStartAngle = atan2(
             position.dy - center.dy,
             position.dx - center.dx,
@@ -434,7 +650,6 @@ class _HomeScreenState extends State<HomeScreen> {
         );
         break;
       case Tool.select:
-        // Try to select an item if we didn't hit a handle
         _selectItemAt(position);
         break;
       case Tool.pan:
@@ -445,29 +660,25 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onPointerMove(PointerMoveEvent event) {
     final position = _transformationController.toScene(event.localPosition);
 
-    if (_isRotating && _selectedItem != null) {
+    if (_isRotating && _selectedItems.length == 1) {
+      final item = _selectedItems.first;
       setState(() {
-        final center =
-            _selectedItem!.position +
-            Offset(
-              _selectedItem!.size.width / 2,
-              _selectedItem!.size.height / 2,
-            );
+        final center = item.position + Offset(item.size.width / 2, item.size.height / 2);
         final currentAngle = atan2(
           position.dy - center.dy,
           position.dx - center.dx,
         );
-        _selectedItem!.angle =
-            _rotationStartAngle + (currentAngle - _dragStartAngle);
+        item.angle = _rotationStartAngle + (currentAngle - _dragStartAngle);
       });
       return;
     }
 
-    if (_isResizing && _selectedItem != null) {
+    if (_isResizing && _selectedItems.length == 1) {
+      final item = _selectedItems.first;
       setState(() {
-        final newWidth = position.dx - _selectedItem!.position.dx;
-        final newHeight = position.dy - _selectedItem!.position.dy;
-        _selectedItem!.size = Size(
+        final newWidth = position.dx - item.position.dx;
+        final newHeight = position.dy - item.position.dy;
+        item.size = Size(
           newWidth > 20 ? newWidth : 20,
           newHeight > 20 ? newHeight : 20,
         );
@@ -483,10 +694,12 @@ class _HomeScreenState extends State<HomeScreen> {
         _eraseAtPoint(position);
         break;
       case Tool.select:
-        if (_selectedItem != null && _editingItemId == null) {
+        if (_selectedItems.isNotEmpty && _editingItemId == null) {
           setState(() {
             final delta = position - _lastPanOffset;
-            _selectedItem!.position += delta;
+            for (var item in _selectedItems) {
+               item.position += delta;
+            }
             _lastPanOffset = position;
           });
         }
@@ -517,7 +730,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     setState(() {
-      // FIX: Ensure active pointers doesn't go below zero
       if (_activePointers > 0) _activePointers--;
       _dragStart = null;
     });
@@ -541,7 +753,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Handle pointer cancel (e.g. dragging off screen)
   void _onPointerCancel(PointerCancelEvent event) {
     setState(() {
       _activePointers = 0;
@@ -551,8 +762,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onDoubleTap(TapDownDetails details) {
     _selectItemAt(_transformationController.toScene(details.localPosition));
-    if (_selectedItem != null && _selectedItem is TextItem) {
-      _startEditing(_selectedItem as TextItem);
+    if (_selectedItems.length == 1) {
+      final item = _selectedItems.first;
+      if (item is TextItem) {
+        _startEditing(item);
+      }
     }
   }
 
@@ -586,8 +800,22 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
       }
     }
+
     setState(() {
-      _selectedItem = newSelectedItem;
+      if (newSelectedItem != null) {
+        if (_isMultiSelectMode) {
+          if (_selectedItems.contains(newSelectedItem)) {
+            _selectedItems.remove(newSelectedItem);
+          } else {
+            _selectedItems.add(newSelectedItem);
+          }
+        } else {
+          _selectedItems.clear();
+          _selectedItems.add(newSelectedItem);
+        }
+      } else if (!_isMultiSelectMode) {
+        _selectedItems.clear();
+      }
     });
   }
 
@@ -635,34 +863,63 @@ class _HomeScreenState extends State<HomeScreen> {
           (_items[itemIndex] as TextItem).text = _textController.text;
           _editingItemId = null;
           _textFocusNode.unfocus();
+          _showVirtualKeyboard = false;
         });
         _saveStateToHistory();
       }
     }
   }
 
-  void _updateSelectedItem(Function(BoardItem) updateFn) {
-    if (_selectedItem != null) {
-      setState(() => updateFn(_selectedItem!));
+  void _updateSelectedItems(Function(BoardItem) updateFn) {
+    if (_selectedItems.isNotEmpty) {
+      setState(() {
+        for (var item in _selectedItems) {
+          updateFn(item);
+        }
+      });
       _saveStateToHistory();
     }
   }
 
-  void _deleteSelectedItem() =>
-      _updateSelectedItem((item) => _items.remove(item));
-  void _duplicateSelectedItem() => _updateSelectedItem((item) {
-    final newItem = item.copy()..position += const Offset(20, 20);
-    _items.add(newItem);
-    _selectedItem = newItem;
-  });
-  void _bringToFront() => _updateSelectedItem((item) {
-    _items.remove(item);
-    _items.add(item);
-  });
-  void _sendToBack() => _updateSelectedItem((item) {
-    _items.remove(item);
-    _items.insert(0, item);
-  });
+  void _deleteSelectedItem() {
+    setState(() => _items.removeWhere((item) => _selectedItems.contains(item)));
+    _selectedItems.clear();
+    _saveStateToHistory();
+  }
+
+  void _duplicateSelectedItem() {
+    setState(() {
+      List<BoardItem> newItems = [];
+      for (var item in _selectedItems) {
+        final newItem = item.copy()..position += const Offset(20, 20);
+        newItems.add(newItem);
+        _items.add(newItem);
+      }
+      _selectedItems.clear();
+      _selectedItems.addAll(newItems);
+    });
+    _saveStateToHistory();
+  }
+  
+  void _bringToFront() {
+     setState(() {
+       for (var item in _selectedItems) {
+         _items.remove(item);
+         _items.add(item);
+       }
+     });
+     _saveStateToHistory();
+  }
+
+  void _sendToBack() {
+    setState(() {
+       for (var item in _selectedItems.toList().reversed) {
+         _items.remove(item);
+         _items.insert(0, item);
+       }
+    });
+    _saveStateToHistory();
+  }
 
   // --- ERASER LOGIC ---
   void _eraseAtPoint(Offset position) {
@@ -808,6 +1065,92 @@ class _HomeScreenState extends State<HomeScreen> {
     _centerView();
   }
 
+  // --- IMPORT LOGIC (UPDATED FOR REAL FILES) ---
+  void _showImportDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Import Object'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.image),
+              title: const Text('Image'),
+              onTap: () {
+                 Navigator.pop(context);
+                 _pickImage(); 
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.view_in_ar),
+              title: const Text('3D Model (.obj, .gltf)'),
+              onTap: () {
+                Navigator.pop(context);
+                _pick3DModel();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _pickImage() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true, // Necessary for Web to get bytes
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        if (file.bytes != null) {
+          final center = _transformationController.toScene(MediaQuery.of(context).size.center(Offset.zero));
+          setState(() {
+            _items.add(ImageItem(
+              id: DateTime.now().millisecondsSinceEpoch.toString(),
+              position: center,
+              size: const Size(200, 200),
+              imageData: file.bytes!,
+            ));
+          });
+          _saveStateToHistory();
+        }
+      }
+    } catch (e) {
+      debugPrint("Error picking image: $e");
+    }
+  }
+
+  void _pick3DModel() async {
+     try {
+       FilePickerResult? result = await FilePicker.platform.pickFiles(
+         type: FileType.custom,
+         allowedExtensions: ['obj', 'gltf', 'glb'],
+         withData: true,
+       );
+
+       if (result != null && result.files.isNotEmpty) {
+         final file = result.files.first;
+         final center = _transformationController.toScene(MediaQuery.of(context).size.center(Offset.zero));
+         
+         setState(() {
+           _items.add(Model3DItem(
+             id: DateTime.now().millisecondsSinceEpoch.toString(),
+             position: center,
+             size: const Size(200, 200),
+             modelName: file.name,
+             modelData: file.bytes,
+           ));
+         });
+         _saveStateToHistory();
+       }
+     } catch (e) {
+       debugPrint("Error picking 3D model: $e");
+     }
+  }
+
   // --- EXTERNAL APP LOGIC ---
 
   void _showExternalAppModal() {
@@ -821,8 +1164,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     String contextTopic = "General";
-    if (_selectedItem != null && _selectedItem is TextItem) {
-      contextTopic = (_selectedItem as TextItem).text;
+    if (_selectedItems.isNotEmpty && _selectedItems.first is TextItem) {
+      contextTopic = (_selectedItems.first as TextItem).text;
     }
 
     final encodedTopic = Uri.encodeComponent(contextTopic);
@@ -883,7 +1226,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // --- UI WIDGET BUILDERS ---
   @override
   Widget build(BuildContext context) {
-    // Only enable panning/zooming if Pan tool is selected OR multi-touch is active
     final bool isInteractionEnabled =
         _selectedTool == Tool.pan || _activePointers > 1;
 
@@ -894,7 +1236,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onPointerDown: _onPointerDown,
             onPointerMove: _onPointerMove,
             onPointerUp: _onPointerUp,
-            onPointerCancel: _onPointerCancel, // Handle pointer cancel
+            onPointerCancel: _onPointerCancel, 
             child: GestureDetector(
               onDoubleTapDown: _onDoubleTap,
               child: InteractiveViewer(
@@ -905,7 +1247,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 constrained: false,
                 panEnabled: isInteractionEnabled,
                 scaleEnabled:
-                    isInteractionEnabled, // Disable scaling when drawing
+                    isInteractionEnabled, 
                 child: Container(
                   width: _infiniteCanvasSize,
                   height: _infiniteCanvasSize,
@@ -924,11 +1266,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         ..._items.map(_buildBoardItem),
                         if (_tempShape != null) _buildBoardItem(_tempShape!),
                         if (_editingItemId != null) _buildTextEditor(),
-                        if (_selectedItem != null && _editingItemId == null)
+                        if (_selectedItems.length == 1 && _editingItemId == null)
                           Positioned.fill(
                             child: CustomPaint(
                               painter: SelectionPainter(
-                                item: _selectedItem!,
+                                item: _selectedItems.first,
                                 zoom: _currentZoom,
                               ),
                             ),
@@ -942,11 +1284,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           _buildMainToolbar(),
           if (_isPropertiesBarVisible()) _buildRightPropertiesBar(),
-          if (_selectedItem != null && _editingItemId == null)
+          if (_selectedItems.isNotEmpty && _editingItemId == null)
             _buildLayeringContextMenu(),
-          if (_selectedItem != null && _editingItemId == null)
+          if (_selectedItems.isNotEmpty && _editingItemId == null)
             _buildSelectionContextMenu(),
           _buildZoomControls(),
+          if (_editingItemId != null && _showVirtualKeyboard)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: VirtualKeyboard(
+                controller: _textController,
+                onClose: () => setState(() => _showVirtualKeyboard = false),
+              ),
+            ),
         ],
       ),
     );
@@ -970,9 +1322,37 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     } else if (item is ShapeItem) {
       content = CustomPaint(painter: ShapePainter(item: item));
+    } else if (item is ImageItem) {
+      content = Image.memory(item.imageData, fit: BoxFit.contain);
+    } else if (item is Model3DItem) {
+      content = Container(
+        color: Colors.grey[300],
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.view_in_ar, size: 40),
+            Text(
+              "Model Imported:\n${item.modelName}",
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+      );
     } else {
       content = const SizedBox.shrink();
     }
+    
+    if (_selectedItems.contains(item) && _selectedItems.length > 1) {
+      content = Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.blueAccent, width: 2),
+        ),
+        child: content,
+      );
+    }
+
     return Positioned(
       left: item.position.dx,
       top: item.position.dy,
@@ -1053,7 +1433,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           _buildToolButton(
                             Tool.select,
                             Icons.near_me,
-                            'Select (Move/Resize)',
+                            'Select',
+                          ),
+                          _buildIconButton(
+                            _isMultiSelectMode ? Icons.checklist : Icons.check_box_outline_blank,
+                            'Multi-Select',
+                            () => setState(() => _isMultiSelectMode = !_isMultiSelectMode),
                           ),
                           _buildToolButton(
                             Tool.pan,
@@ -1085,12 +1470,22 @@ class _HomeScreenState extends State<HomeScreen> {
                             'Text',
                           ),
                           _buildIconButton(
+                            Icons.keyboard,
+                            'Virtual Keyboard',
+                            () => setState(() => _showVirtualKeyboard = !_showVirtualKeyboard),
+                          ),
+                          _buildIconButton(
                             Icons.add_reaction_outlined,
                             'Add Emoji',
                             _showObjectLibrary,
                           ),
                           _buildIconButton(
-                            Icons.language_outlined,
+                            Icons.file_upload_outlined,
+                            'Import Object',
+                            _showImportDialog,
+                          ),
+                          _buildIconButton(
+                            Icons.language_outlined, 
                             'Open App Context',
                             _showExternalAppModal,
                           ),
@@ -1267,7 +1662,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildSelectionContextMenu() {
-    final isTextItem = _selectedItem is TextItem;
+    final isSingleTextItem = _selectedItems.length == 1 && _selectedItems.first is TextItem;
+    
     return Positioned(
       bottom: 20,
       left: 0,
@@ -1301,7 +1697,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   "Duplicate",
                   _duplicateSelectedItem,
                 ),
-                if (isTextItem) ...[
+                if (isSingleTextItem) ...[
                   Container(
                     width: 1,
                     height: 24,
@@ -1311,7 +1707,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   _buildIconButton(
                     Icons.format_bold,
                     "Bold",
-                    () => _updateSelectedItem((item) {
+                    () => _updateSelectedItems((item) {
                       if (item is TextItem) {
                         item.fontWeight = item.fontWeight == FontWeight.bold
                             ? FontWeight.normal
@@ -1322,7 +1718,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   _buildIconButton(
                     Icons.format_italic,
                     "Italic",
-                    () => _updateSelectedItem((item) {
+                    () => _updateSelectedItems((item) {
                       if (item is TextItem) {
                         item.fontStyle = item.fontStyle == FontStyle.italic
                             ? FontStyle.normal
@@ -1333,7 +1729,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   _buildIconButton(
                     Icons.format_underline,
                     "Underline",
-                    () => _updateSelectedItem((item) {
+                    () => _updateSelectedItems((item) {
                       if (item is TextItem) {
                         item.decoration =
                             item.decoration == TextDecoration.underline
@@ -1351,7 +1747,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   _buildIconButton(
                     Icons.text_increase,
                     "Increase Size",
-                    () => _updateSelectedItem((item) {
+                    () => _updateSelectedItems((item) {
                       if (item is TextItem) {
                         item.fontSize += 2;
                       }
@@ -1360,7 +1756,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   _buildIconButton(
                     Icons.text_decrease,
                     "Decrease Size",
-                    () => _updateSelectedItem((item) {
+                    () => _updateSelectedItems((item) {
                       if (item is TextItem) {
                         item.fontSize = item.fontSize > 4
                             ? item.fontSize - 2
@@ -1434,10 +1830,10 @@ class _HomeScreenState extends State<HomeScreen> {
           borderRadius: BorderRadius.circular(8),
           onTap: () => setState(() {
             _selectedTool = tool;
-            // FIX: Force reset pointer count when switching tools
             _activePointers = 0;
             if (tool != Tool.select) {
-              _selectedItem = null;
+              _selectedItems.clear();
+              _isMultiSelectMode = false;
             }
           }),
           child: Container(
