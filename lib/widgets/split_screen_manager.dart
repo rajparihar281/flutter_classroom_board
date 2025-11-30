@@ -22,7 +22,7 @@ class _SplitScreenManagerState extends State<SplitScreenManager> {
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF1E1E1E),
+        backgroundColor: const Color(0xFF1E1E1E), 
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
           padding: const EdgeInsets.all(20.0),
@@ -111,6 +111,7 @@ class _SplitScreenManagerState extends State<SplitScreenManager> {
   }
 
   Widget _buildLayout() {
+    // All layouts now return a single Row to ensure 1-row functionality
     switch (_screenCount) {
       case 2:
         return Row(
@@ -126,40 +127,21 @@ class _SplitScreenManagerState extends State<SplitScreenManager> {
             Expanded(child: SingleBoard(key: const ValueKey(1), boardId: 1)),
             Container(width: 2, color: Colors.black),
             Expanded(child: SingleBoard(key: const ValueKey(2), boardId: 2)),
-            Container(width: 2, color: Colors.black),
+             Container(width: 2, color: Colors.black),
             Expanded(child: SingleBoard(key: const ValueKey(3), boardId: 3)),
           ],
         );
       case 4:
-        return Column(
+        // Changed from Column (2x2 grid) to Row (1x4 strip)
+        return Row(
           children: [
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: SingleBoard(key: const ValueKey(1), boardId: 1),
-                  ),
-                  Container(width: 2, color: Colors.black),
-                  Expanded(
-                    child: SingleBoard(key: const ValueKey(2), boardId: 2),
-                  ),
-                ],
-              ),
-            ),
-            Container(height: 2, color: Colors.black),
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: SingleBoard(key: const ValueKey(3), boardId: 3),
-                  ),
-                  Container(width: 2, color: Colors.black),
-                  Expanded(
-                    child: SingleBoard(key: const ValueKey(4), boardId: 4),
-                  ),
-                ],
-              ),
-            ),
+            Expanded(child: SingleBoard(key: const ValueKey(1), boardId: 1)),
+            Container(width: 2, color: Colors.black),
+            Expanded(child: SingleBoard(key: const ValueKey(2), boardId: 2)),
+            Container(width: 2, color: Colors.black),
+            Expanded(child: SingleBoard(key: const ValueKey(3), boardId: 3)),
+            Container(width: 2, color: Colors.black),
+            Expanded(child: SingleBoard(key: const ValueKey(4), boardId: 4)),
           ],
         );
       case 1:
