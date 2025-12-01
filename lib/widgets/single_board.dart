@@ -1,12 +1,18 @@
+import 'dart:async'; // Required for Timer
 import 'dart:math';
-// Required for Uint8List
+import 'dart:convert';
+// Required for Web interaction
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
 // ignore: avoid_web_libraries_in_flutter
+import 'dart:js_util' as js_util;
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:model_viewer_plus/model_viewer_plus.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import '../models/models.dart';
 import '../painters/painters.dart';
 import 'virtual_keyboard.dart';
@@ -66,6 +72,11 @@ class _SingleBoardState extends State<SingleBoard> {
   // Gesture handling state
   int _activePointers = 0;
   bool _isToolbarOnLeft = true;
+
+  // 3D Model Control (Mobile)
+  WebViewController? _modelWebViewController;
+  // Track initialized web listeners to prevent duplicate attachments
+  final Set<String> _attachedWebListeners = {};
 
   @override
   void initState() {
@@ -703,6 +714,14 @@ class _SingleBoardState extends State<SingleBoard> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.category),
+              title: const Text('Custom Shape (SVG)'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickSvg();
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.view_in_ar),
               title: const Text('3D Model (.obj, .gltf)'),
               onTap: () {
@@ -748,6 +767,39 @@ class _SingleBoardState extends State<SingleBoard> {
     }
   }
 
+  void _pickSvg() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['svg'],
+        withData: true,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        if (file.bytes != null) {
+          final RenderBox box = context.findRenderObject() as RenderBox;
+          final center = _transformationController.toScene(
+            box.size.center(Offset.zero),
+          );
+          setState(() {
+            _items.add(
+              SvgItem(
+                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                position: center,
+                size: const Size(200, 200),
+                svgData: file.bytes!,
+              ),
+            );
+          });
+          _saveStateToHistory();
+        }
+      }
+    } catch (e) {
+      debugPrint("Error picking SVG: $e");
+    }
+  }
+
   void _pick3DModel() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
@@ -768,9 +820,10 @@ class _SingleBoardState extends State<SingleBoard> {
             Model3DItem(
               id: DateTime.now().millisecondsSinceEpoch.toString(),
               position: center,
-              size: const Size(200, 200),
+              size: const Size(300, 300),
               modelName: file.name,
               modelData: file.bytes,
+              filePath: kIsWeb ? null : file.path,
             ),
           );
         });
@@ -943,6 +996,10 @@ class _SingleBoardState extends State<SingleBoard> {
                   ),
                 ),
 
+              if (_selectedItems.length == 1 &&
+                  _selectedItems.first is Model3DItem)
+                _buildAnimationControls(_selectedItems.first as Model3DItem),
+
               Positioned(
                 top: 10,
                 right: constraints.maxWidth / 2 - 20,
@@ -968,6 +1025,119 @@ class _SingleBoardState extends State<SingleBoard> {
     );
   }
 
+  Widget _buildAnimationControls(Model3DItem item) {
+    if (item.animationWeights.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned(
+      top: 100,
+      right: 20,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        width: 200,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(30),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Animation Controls",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            const Divider(),
+            ...item.animationWeights.keys.map((animName) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(animName, style: const TextStyle(fontSize: 12)),
+                  SizedBox(
+                    height: 30,
+                    child: Slider(
+                      value: item.animationWeights[animName] ?? 0.0,
+                      min: 0.0,
+                      max: 1.0,
+                      onChanged: (val) {
+                        setState(() {
+                          item.animationWeights[animName] = val;
+                        });
+                        _updateAnimationWeight(item, animName, val);
+                      },
+                    ),
+                  ),
+                ],
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _updateAnimationWeight(Model3DItem item, String name, double weight) {
+    if (kIsWeb) {
+      // WEB: Direct DOM manipulation
+      final element = html.document.getElementById('model-viewer-${item.id}');
+      if (element != null) {
+        // We use js_util to call the method because 'appendAnimation' is added by the component
+        // syntax: modelViewer.appendAnimation(name, { weight: value })
+        final options = js_util.newObject();
+        js_util.setProperty(options, 'weight', weight);
+
+        js_util.callMethod(element, 'appendAnimation', [name, options]);
+      }
+    } else {
+      // MOBILE: JS Injection via Controller
+      if (_modelWebViewController != null) {
+        _modelWebViewController!.runJavaScript('''
+          const modelViewer = document.querySelector('model-viewer');
+          if (modelViewer) {
+            modelViewer.appendAnimation("$name", {
+               weight: $weight
+            });
+          }
+        ''');
+      }
+    }
+  }
+
+  void _setupWebListener(String elementId, Model3DItem item) {
+    // Retry finding the element since it might take a few frames to render
+    Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      final element = html.document.getElementById(elementId);
+      if (element != null) {
+        timer.cancel();
+
+        // Listen for the 'load' event to fetch animations
+        element.addEventListener('load', (event) {
+          final anims = js_util.getProperty(element, 'availableAnimations');
+          if (anims != null) {
+            // Convert JS Array to Dart List
+            final List<dynamic> animList = List.from(anims);
+
+            setState(() {
+              for (var anim in animList) {
+                final String animName = anim.toString();
+                if (!item.animationWeights.containsKey(animName)) {
+                  item.animationWeights[animName] = 0.0;
+                }
+              }
+            });
+          }
+        });
+      }
+    });
+  }
+
   Widget _buildBoardItem(BoardItem item) {
     Widget content;
     if (item is TextItem) {
@@ -988,22 +1158,83 @@ class _SingleBoardState extends State<SingleBoard> {
       content = CustomPaint(painter: ShapePainter(item: item));
     } else if (item is ImageItem) {
       content = Image.memory(item.imageData, fit: BoxFit.contain);
-    } else if (item is Model3DItem) {
-      content = Container(
-        color: Colors.grey[300],
-        alignment: Alignment.center,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.view_in_ar, size: 40),
-            Text(
-              "Model Imported:\n${item.modelName}",
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12),
-            ),
-          ],
-        ),
+    } else if (item is SvgItem) {
+      content = SvgPicture.memory(
+        item.svgData,
+        fit: BoxFit.contain,
+        colorFilter: item.color != null
+            ? ColorFilter.mode(item.color!, BlendMode.srcIn)
+            : null,
       );
+    } else if (item is Model3DItem) {
+      // 3D Rendering logic
+      if (kIsWeb) {
+        if (item.modelData != null) {
+          final blob = html.Blob([item.modelData]);
+          final url = html.Url.createObjectUrlFromBlob(blob);
+
+          final webId = 'model-viewer-${item.id}';
+
+          // Setup listener if not already attached
+          if (!_attachedWebListeners.contains(item.id)) {
+            _attachedWebListeners.add(item.id);
+            _setupWebListener(webId, item);
+          }
+
+          content = ModelViewer(
+            id: webId, // IMPORTANT: Assign ID for DOM access
+            src: url,
+            alt: item.modelName,
+            autoRotate: true,
+            cameraControls: true,
+            backgroundColor: Colors.transparent,
+          );
+        } else {
+          content = const Center(child: Text("Invalid 3D Data"));
+        }
+      } else {
+        // Mobile
+        if (item.filePath != null) {
+          content = ModelViewer(
+            src: 'file://${item.filePath}',
+            alt: item.modelName,
+            autoRotate: true,
+            cameraControls: true,
+            backgroundColor: Colors.transparent,
+            // Register the channel
+            javascriptChannels: {
+              JavascriptChannel(
+                'AnimationChannel',
+                onMessageReceived: (message) {
+                  final List<dynamic> anims = jsonDecode(message.message);
+                  setState(() {
+                    for (var anim in anims) {
+                      if (!item.animationWeights.containsKey(anim.toString())) {
+                        item.animationWeights[anim.toString()] = 0.0;
+                      }
+                    }
+                  });
+                },
+              ),
+            },
+            onWebViewCreated: (WebViewController controller) {
+              _modelWebViewController = controller;
+              // Inject listener script
+              controller.runJavaScript('''
+                const modelViewer = document.querySelector('model-viewer');
+                modelViewer.addEventListener('load', () => {
+                  const anims = modelViewer.availableAnimations;
+                  if(window.AnimationChannel) {
+                    window.AnimationChannel.postMessage(JSON.stringify(anims));
+                  }
+                });
+               ''');
+            },
+          );
+        } else {
+          content = const Center(child: Text("3D File Path Missing"));
+        }
+      }
     } else {
       content = const SizedBox.shrink();
     }

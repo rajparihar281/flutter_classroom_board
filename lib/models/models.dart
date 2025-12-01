@@ -135,9 +135,36 @@ class ImageItem extends BoardItem {
   );
 }
 
+class SvgItem extends BoardItem {
+  final Uint8List svgData;
+  final Color? color;
+
+  SvgItem({
+    required super.id,
+    required super.position,
+    required super.size,
+    required this.svgData,
+    this.color,
+    super.angle,
+  });
+
+  @override
+  BoardItem copy() => SvgItem(
+    id: DateTime.now().millisecondsSinceEpoch.toString(),
+    position: position,
+    size: size,
+    svgData: svgData,
+    color: color,
+    angle: angle,
+  );
+}
+
 class Model3DItem extends BoardItem {
   final String modelName;
   final Uint8List? modelData;
+  final String? filePath;
+  // Stores current weight (0.0 to 1.0) for each animation name
+  Map<String, double> animationWeights;
 
   Model3DItem({
     required super.id,
@@ -145,8 +172,10 @@ class Model3DItem extends BoardItem {
     required super.size,
     required this.modelName,
     this.modelData,
+    this.filePath,
+    Map<String, double>? animationWeights,
     super.angle,
-  });
+  }) : animationWeights = animationWeights ?? {};
 
   @override
   BoardItem copy() => Model3DItem(
@@ -155,6 +184,8 @@ class Model3DItem extends BoardItem {
     size: size,
     modelName: modelName,
     modelData: modelData,
+    filePath: filePath,
+    animationWeights: Map.from(animationWeights),
     angle: angle,
   );
 }
