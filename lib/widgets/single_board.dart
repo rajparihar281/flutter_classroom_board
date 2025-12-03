@@ -1,6 +1,7 @@
 import 'dart:async'; // Required for Timer
 import 'dart:math';
 import 'dart:convert';
+import 'topic_selector.dart'; // Add this import
 // Required for Web interaction
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
@@ -30,7 +31,7 @@ class _SingleBoardState extends State<SingleBoard> {
   BoardBackground _selectedBackground = BoardBackground.plain;
   Color _backgroundColor = Colors.white;
   Tool _selectedTool = Tool.pen;
-
+  TopicContext? _topicContext;
   // Board content
   List<BoardItem> _items = [];
   List<Drawing> _drawings = [];
@@ -837,73 +838,140 @@ class _SingleBoardState extends State<SingleBoard> {
   // --- EXTERNAL APP LOGIC ---
 
   // ignore: unused_element
-  void _showExternalAppModal() {
-    if (!kIsWeb) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("IFrame feature is only supported on Web for now."),
+ void _showExternalAppModal() {
+    // If no context is set, show the selector first
+    if (_topicContext == null) {
+      showDialog(
+        context: context,
+        builder: (context) => TopicSelectorDialog(
+          onConfirm: (newContext) {
+            setState(() {
+              _topicContext = newContext;
+            });
+            // Recursively call to show the actual iframe now that context is set
+            Future.delayed(const Duration(milliseconds: 100), () {
+              _showExternalAppModal();
+            });
+          },
         ),
       );
       return;
     }
 
-    String contextTopic = "General";
-    if (_selectedItems.isNotEmpty && _selectedItems.first is TextItem) {
-      contextTopic = (_selectedItems.first as TextItem).text;
-    }
+    // Prepare the URL
+    final String query = _topicContext!.toQueryString();
+    final String appUrl = "https://aitutor.pragament.com/?$query";
 
-    final encodedTopic = Uri.encodeComponent(contextTopic);
-    final String appUrl = "https://flutter.dev/?context=$encodedTopic";
-    final String viewId = 'iframe-${DateTime.now().millisecondsSinceEpoch}';
+    // --- Web Specific Implementation ---
+    if (kIsWeb) {
+      final String viewId = 'iframe-${DateTime.now().millisecondsSinceEpoch}';
 
-    ui_web.platformViewRegistry.registerViewFactory(viewId, (int viewId) {
-      final iframe = html.IFrameElement()
-        ..src = appUrl
-        ..style.border = 'none'
-        ..style.width = '100%'
-        ..style.height = '100%';
-      return iframe;
-    });
+      // Register the view factory
+      ui_web.platformViewRegistry.registerViewFactory(viewId, (int viewId) {
+        final iframe = html.IFrameElement()
+          ..src = appUrl
+          ..style.border = 'none'
+          ..style.width = '100%'
+          ..style.height = '100%';
+        return iframe;
+      });
 
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          width: MediaQuery.of(context).size.width * 0.8,
-          height: MediaQuery.of(context).size.height * 0.8,
-          decoration: BoxDecoration(
-            color: Colors.white,
+      showDialog(
+        context: context,
+        builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      "External App (Context: $contextTopic)",
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.9,
+            height: MediaQuery.of(context).size.height * 0.9,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "AI Tutor",
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            "${_topicContext!.board} > ${_topicContext!.subject} > ${_topicContext!.topic}",
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ],
+                      Row(
+                        children: [
+                          TextButton.icon(
+                            icon: const Icon(Icons.edit),
+                            label: const Text("Change Context"),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              setState(
+                                () => _topicContext = null,
+                              ); // Reset to trigger selector
+                              _showExternalAppModal();
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(child: HtmlElementView(viewType: viewId)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    // --- Mobile Specific Implementation ---
+    else {
+      // Mobile WebView implementation (using webview_flutter)
+      showDialog(
+        context: context,
+        builder: (context) => Dialog(
+          insetPadding: EdgeInsets.zero,
+          child: Stack(
+            children: [
+              WebViewWidget(
+                controller: WebViewController()
+                  ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                  ..loadRequest(Uri.parse(appUrl)),
+              ),
+              Positioned(
+                top: 10,
+                right: 10,
+                child: FloatingActionButton.small(
+                  child: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
                 ),
               ),
-              const Divider(height: 1),
-              Expanded(child: HtmlElementView(viewType: viewId)),
             ],
           ),
         ),
-      ),
-    );
+      );
+    }
   }
 
   // --- UI WIDGET BUILDERS ---
@@ -1344,6 +1412,12 @@ class _SingleBoardState extends State<SingleBoard> {
                               () => setState(
                                 () => _isMultiSelectMode = !_isMultiSelectMode,
                               ),
+                            ),
+                            _buildIconButton(
+                              Icons
+                                  .school_outlined, // Appropriate icon for AI Tutor
+                              'AI Tutor',
+                              _showExternalAppModal,
                             ),
                             _buildToolButton(
                               Tool.pan,
