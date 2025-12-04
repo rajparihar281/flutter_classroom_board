@@ -220,6 +220,7 @@ class KeyboardLayout {
     'Symbols': ['1234567890', "-/:;()&@", '.,?!'],
   };
 }
+
 class TopicContext {
   final String board;
   final String grade;
@@ -238,15 +239,16 @@ class TopicContext {
   });
 
   String toQueryString() {
-    // We use a Map<String, dynamic> to handle the parameters
+    // 1. Base parameters
     final Map<String, dynamic> params = {
       'board': board,
-      'class': grade,
+      'class': grade, // Maps local 'grade' variable to URL 'class' parameter
       'subject': subject,
     };
 
-    // STRICT KEY NAMING based on your requirements:
-    // Use plural keys 'chapters', 'topics', 'subtopics' even for single values
+    // 2. Specific Context parameters
+    // REQUIRED: We use PLURAL keys ('chapters', 'topics', 'subtopics')
+    // to match the target URL format: ...&chapters=X&topics=Y&subtopics=Z
     if (chapter != null && chapter!.isNotEmpty) {
       params['chapters'] = chapter!;
     }
@@ -259,14 +261,14 @@ class TopicContext {
       params['subtopics'] = subtopic!;
     }
 
-    // Construct the query string manually or via Uri
-    // Using Uri to ensure proper encoding of spaces to %20 etc.
+    // 3. Generate URI
+    // This automatically handles special characters and spaces (e.g. "Class 9" -> "Class%209")
     final uri = Uri(
       scheme: 'https',
       host: 'aitutor.pragament.com',
       queryParameters: params,
     );
 
-    return uri.query; // Returns "board=CBSE&class=Class9&..."
+    return uri.query;
   }
 }
