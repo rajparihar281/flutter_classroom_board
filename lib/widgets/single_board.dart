@@ -19,7 +19,8 @@ import 'virtual_keyboard.dart';
 
 class SingleBoard extends StatefulWidget {
   final int boardId;
-  const SingleBoard({super.key, required this.boardId});
+  final String? initialUrl;
+  const SingleBoard({super.key, required this.boardId, this.initialUrl});
 
   @override
   _SingleBoardState createState() => _SingleBoardState();
@@ -93,6 +94,11 @@ class _SingleBoardState extends State<SingleBoard> {
         });
       }
     });
+    if (widget.initialUrl != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadUrlContent(widget.initialUrl!);
+      });
+    }
   }
 
   void _centerView(Size size) {
@@ -836,8 +842,20 @@ class _SingleBoardState extends State<SingleBoard> {
 
   // --- EXTERNAL APP LOGIC ---
 
+  void _loadUrlContent(String url) {
+    if (!kIsWeb) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("IFrame feature is only supported on Web."),
+        ),
+      );
+      return;
+    }
+    _showExternalAppModal(url: url);
+  }
+
   // ignore: unused_element
-  void _showExternalAppModal() {
+  void _showExternalAppModal({String? url}) {
     if (!kIsWeb) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -847,13 +865,14 @@ class _SingleBoardState extends State<SingleBoard> {
       return;
     }
 
-    String contextTopic = "General";
-    if (_selectedItems.isNotEmpty && _selectedItems.first is TextItem) {
-      contextTopic = (_selectedItems.first as TextItem).text;
-    }
-
-    final encodedTopic = Uri.encodeComponent(contextTopic);
-    final String appUrl = "https://flutter.dev/?context=$encodedTopic";
+    final String appUrl = url ?? (() {
+      String contextTopic = "General";
+      if (_selectedItems.isNotEmpty && _selectedItems.first is TextItem) {
+        contextTopic = (_selectedItems.first as TextItem).text;
+      }
+      final encodedTopic = Uri.encodeComponent(contextTopic);
+      return "https://flutter.dev/?context=$encodedTopic";
+    })();
     final String viewId = 'iframe-${DateTime.now().millisecondsSinceEpoch}';
 
     ui_web.platformViewRegistry.registerViewFactory(viewId, (int viewId) {
@@ -884,7 +903,7 @@ class _SingleBoardState extends State<SingleBoard> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      "External App (Context: $contextTopic)",
+                      "Educational Content",
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -898,7 +917,21 @@ class _SingleBoardState extends State<SingleBoard> {
                 ),
               ),
               const Divider(height: 1),
-              Expanded(child: HtmlElementView(viewType: viewId)),
+              Expanded(
+                child: Stack(
+                  children: [
+                    HtmlElementView(viewType: viewId),
+                    Positioned(
+                      bottom: 10,
+                      right: 10,
+                      child: FloatingActionButton.small(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Icon(Icons.close),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),

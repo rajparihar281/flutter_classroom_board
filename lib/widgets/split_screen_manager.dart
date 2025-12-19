@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'single_board.dart';
+import 'topic_hierarchy_widget.dart';
 
 class SplitScreenManager extends StatefulWidget {
   const SplitScreenManager({super.key});
@@ -10,12 +11,27 @@ class SplitScreenManager extends StatefulWidget {
 
 class _SplitScreenManagerState extends State<SplitScreenManager> {
   int _screenCount = 1;
+  bool _showTopicHierarchy = false;
+  String? _currentUrl;
 
   void _changeLayout(int count) {
     setState(() {
       _screenCount = count;
     });
     Navigator.pop(context);
+  }
+
+  void _toggleTopicHierarchy() {
+    setState(() {
+      _showTopicHierarchy = !_showTopicHierarchy;
+    });
+  }
+
+  void _onUrlGenerated(String url) {
+    setState(() {
+      _currentUrl = url;
+      _showTopicHierarchy = false;
+    });
   }
 
   void _showLayoutDialog() {
@@ -94,15 +110,39 @@ class _SplitScreenManagerState extends State<SplitScreenManager> {
     return Scaffold(
       body: Stack(
         children: [
-          _buildLayout(),
+          Column(
+            children: [
+              Expanded(
+                flex: _showTopicHierarchy ? 75 : 100,
+                child: _buildLayout(),
+              ),
+              if (_showTopicHierarchy)
+                Expanded(
+                  flex: 25,
+                  child: TopicHierarchyWidget(onUrlGenerated: _onUrlGenerated),
+                ),
+            ],
+          ),
           Positioned(
-            bottom: 20,
-            left: 20,
-            child: FloatingActionButton(
-              backgroundColor: const Color(0xFF1E1E1E),
-              onPressed: _showLayoutDialog,
-              tooltip: 'Layout Settings',
-              child: const Icon(Icons.grid_view_rounded, color: Colors.white),
+            top: 120,
+            right: 20,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton(
+                  backgroundColor: const Color(0xFF1E1E1E),
+                  onPressed: _toggleTopicHierarchy,
+                  tooltip: 'Topic Hierarchy',
+                  child: const Icon(Icons.school, color: Colors.white),
+                ),
+                const SizedBox(height: 10),
+                FloatingActionButton(
+                  backgroundColor: const Color(0xFF1E1E1E),
+                  onPressed: _showLayoutDialog,
+                  tooltip: 'Layout Settings',
+                  child: const Icon(Icons.grid_view_rounded, color: Colors.white),
+                ),
+              ],
             ),
           ),
         ],
@@ -116,37 +156,37 @@ class _SplitScreenManagerState extends State<SplitScreenManager> {
       case 2:
         return Row(
           children: [
-            Expanded(child: SingleBoard(key: const ValueKey(1), boardId: 1)),
+            Expanded(child: SingleBoard(key: const ValueKey(1), boardId: 1, initialUrl: _currentUrl)),
             Container(width: 2, color: Colors.black),
-            Expanded(child: SingleBoard(key: const ValueKey(2), boardId: 2)),
+            Expanded(child: SingleBoard(key: const ValueKey(2), boardId: 2, initialUrl: _currentUrl)),
           ],
         );
       case 3:
         return Row(
           children: [
-            Expanded(child: SingleBoard(key: const ValueKey(1), boardId: 1)),
+            Expanded(child: SingleBoard(key: const ValueKey(1), boardId: 1, initialUrl: _currentUrl)),
             Container(width: 2, color: Colors.black),
-            Expanded(child: SingleBoard(key: const ValueKey(2), boardId: 2)),
+            Expanded(child: SingleBoard(key: const ValueKey(2), boardId: 2, initialUrl: _currentUrl)),
              Container(width: 2, color: Colors.black),
-            Expanded(child: SingleBoard(key: const ValueKey(3), boardId: 3)),
+            Expanded(child: SingleBoard(key: const ValueKey(3), boardId: 3, initialUrl: _currentUrl)),
           ],
         );
       case 4:
         // Changed from Column (2x2 grid) to Row (1x4 strip)
         return Row(
           children: [
-            Expanded(child: SingleBoard(key: const ValueKey(1), boardId: 1)),
+            Expanded(child: SingleBoard(key: const ValueKey(1), boardId: 1, initialUrl: _currentUrl)),
             Container(width: 2, color: Colors.black),
-            Expanded(child: SingleBoard(key: const ValueKey(2), boardId: 2)),
+            Expanded(child: SingleBoard(key: const ValueKey(2), boardId: 2, initialUrl: _currentUrl)),
             Container(width: 2, color: Colors.black),
-            Expanded(child: SingleBoard(key: const ValueKey(3), boardId: 3)),
+            Expanded(child: SingleBoard(key: const ValueKey(3), boardId: 3, initialUrl: _currentUrl)),
             Container(width: 2, color: Colors.black),
-            Expanded(child: SingleBoard(key: const ValueKey(4), boardId: 4)),
+            Expanded(child: SingleBoard(key: const ValueKey(4), boardId: 4, initialUrl: _currentUrl)),
           ],
         );
       case 1:
       default:
-        return SingleBoard(key: const ValueKey(1), boardId: 1);
+        return SingleBoard(key: const ValueKey(1), boardId: 1, initialUrl: _currentUrl);
     }
   }
 }
